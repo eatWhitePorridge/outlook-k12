@@ -1,0 +1,30 @@
+{
+  "mail_backend": "cloudmail",
+  "cloudmail": {
+    "base_url": "https://cloudmail.example.com",
+    "admin_email": "admin@example.com",
+    "admin_password": "在这里填 admin 密码（或用 CM_ADMIN_PASSWORD 环境变量）",
+    "domain": "example.com",
+    "proxy": null,
+    "token_cache_path": null
+  },
+  "outlook": {
+    "account_line": "email@outlook.com----password----client_id----refresh_token",
+    "tenant": "consumers",
+    "mode": "auto",
+    "scope": "https://graph.microsoft.com/.default offline_access",
+    "imap_scope": "offline_access https://outlook.office.com/IMAP.AccessAsUser.All",
+    "alias_mode": "plus",
+    "alias_prefix": "oai",
+    "proxy": null
+  },
+  "register_proxy": null,
+  "otp_max_retries": 40,
+  "otp_poll_interval_s": 3.0,
+  "export_sub2api": true,
+  "product_dir": "product_files",
+  "fetch_chatgpt_account_id": false,
+  "chatgpt_web_login": true,
+  "workspace_id": "",
+  "workspace_join_timeout_s": 20.0
+}

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Register Console</title>
+  <link rel="stylesheet" href="/static/control.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">GR</div>
+        <div>
+          <div class="brand-title">Register Console</div>
+          <div class="brand-subtitle">Outlook · Workspace · sub2api</div>
+        </div>
+      </div>
+      <div class="api-key-box">
+        <input id="apiKey" class="input input-sm" autocomplete="off" placeholder="X-API-Key" />
+        <button id="saveApiKey" class="btn btn-secondary btn-sm" type="button">保存</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="page-head">
+      <div>
+        <h1>注册任务</h1>
+        <p>配置账号池、并发、workspace 和上传。</p>
+      </div>
+      <div class="head-actions">
+        <button id="refreshJobs" class="btn btn-secondary" type="button">刷新</button>
+      </div>
+    </section>
+
+    <section class="summary-grid" aria-label="任务概览">
+      <div class="metric-card">
+        <span class="metric-label">状态</span>
+        <strong id="metricStatus">-</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">进度</span>
+        <strong id="metricProgress">0/0</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">失败</span>
+        <strong id="metricFailed">0</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">队列</span>
+        <strong id="metricPending">0</strong>
+      </div>
+    </section>
+
+    <div class="layout">
+      <aside class="panel config-panel">
+        <form id="jobForm" class="form">
+          <section class="form-section">
+            <div class="section-title">任务</div>
+            <label class="field">
+              <span>任务名</span>
+              <input id="jobName" class="input" placeholder="outlook-original-20" />
+            </label>
+            <label class="field">
+              <span>Outlook 账号</span>
+              <textarea id="outlookAccounts" class="input textarea mono" rows="8" spellcheck="false" placeholder="email@outlook.com----password----client_id----refresh_token"></textarea>
+            </label>
+          </section>
+
+          <section class="form-section">
+            <div class="section-title">注册</div>
+            <label class="field">
+              <span>Workspace ID</span>
+              <input id="workspaceId" class="input mono" placeholder="631e1603-..." />
+            </label>
+            <div class="field-grid two">
+              <label class="field">
+                <span>邮箱模式</span>
+                <select id="emailMode" class="input">
+                  <option value="base">原始邮箱</option>
+                  <option value="plus">Plus 别名</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>每邮箱</span>
+                <input id="countPerAccount" class="input" type="number" min="1" max="20" value="1" />
+              </label>
+            </div>
+            <div class="field-grid three">
+              <label class="field">
+                <span>并发</span>
+                <input id="concurrency" class="input" type="number" min="1" max="50" value="5" />
+              </label>
+              <label class="field">
+                <span>重试</span>
+                <input id="attempts" class="input" type="number" min="1" max="5" value="2" />
+              </label>
+              <label class="field">
+                <span>别名前缀</span>
+                <input id="aliasPrefix" class="input" value="b" />
+              </label>
+            </div>
+            <div class="field-grid three">
+              <label class="field">
+                <span>收码轮询</span>
+                <input id="otpMaxRetries" class="input" type="number" value="40" />
+              </label>
+              <label class="field">
+                <span>间隔秒</span>
+                <input id="otpPollInterval" class="input" type="number" step="0.5" value="3" />
+              </label>
+              <label class="field">
+                <span>Join 超时</span>
+                <input id="workspaceJoinTimeout" class="input" type="number" value="20" />
+              </label>
+            </div>
+            <label class="field">
+              <span>注册代理</span>
+              <input id="registerProxy" class="input" placeholder="http://user:pass@host:port" />
+            </label>
+          </section>
+
+          <section class="form-section sub2api-box">
+            <label class="check-row">
+              <input id="sub2apiUpload" type="checkbox" />
+              <span>完成后上传 sub2api</span>
+            </label>
+            <label class="check-row">
+              <input id="purgeAfterUpload" type="checkbox" checked />
+              <span>上传成功后清理本地敏感产物</span>
+            </label>
+            <label class="field">
+              <span>sub2api URL</span>
+              <input id="sub2apiUrl" class="input" value="https://sub2api.example.com" />
+            </label>
+            <label class="field">
+              <span>Bearer</span>
+              <textarea id="sub2apiBearer" class="input textarea mono" rows="2" spellcheck="false" placeholder="Bearer ..."></textarea>
+            </label>
+          </section>
+
+          <div id="formError" class="alert hidden"></div>
+          <button id="startJob" class="btn btn-primary btn-block" type="submit">启动任务</button>
+        </form>
+      </aside>
+
+      <section class="workspace">
+        <section class="panel jobs-panel">
+          <div class="panel-head">
+            <div>
+              <h2>任务列表</h2>
+              <p id="jobCountText">0 个任务</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="job-table">
+              <colgroup>
+                <col class="col-job" />
+                <col class="col-status" />
+                <col class="col-progress" />
+                <col class="col-updated" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>任务</th>
+                  <th>状态</th>
+                  <th class="right">进度</th>
+                  <th class="right">更新</th>
+                </tr>
+              </thead>
+              <tbody id="jobsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel detail-panel">
+          <div class="detail-head">
+            <div class="detail-title-wrap">
+              <h2 id="selectedTitle">未选择任务</h2>
+              <p id="selectedMeta">启动任务后查看日志和产物。</p>
+            </div>
+            <div class="detail-actions">
+              <button id="uploadSelected" class="btn btn-secondary" type="button">上传 sub2api</button>
+              <button id="cancelSelected" class="btn btn-secondary" type="button">取消</button>
+            </div>
+          </div>
+          <div id="artifactButtons" class="artifact-row"></div>
+          <pre id="logs" class="log-box" aria-label="任务日志"></pre>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/control.js"></script>
+</body>
+</html>

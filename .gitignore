@@ -1,0 +1,54 @@
+# Local secrets / runtime config
+.env
+.env.*
+!.env.example
+config.json
+.gpt_register_lite_cm_token.json
+cm_token.json
+
+# Python / editor / OS
+*.pyc
+__pycache__/
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+.claude/
+.ace-tool/
+.playwright-mcp/
+
+# Runtime data / SQLite
+.local_data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Generated account/token outputs
+results_*.json
+product_files/
+saved_accounts*/
+redeemed_accounts/
+batch-results*/
+output/
+server-output/
+server-code/
+access_tokens*.txt
+refresh_tokens*.txt
+sub2api_product_*.json
+sub2api_upload_receipt_*.json
+sub2api_upload_failed_*.json
+results_full.json
+summary.json
+run.log
+*.log
+*.pid
+
+# Local backups / old experiments
+*.bak
+*.bak-*
+*.bak.*
+*.bak-db-*
+**/*.bak-db-*
+run_10_swyel_local_sub2api.*
+no
