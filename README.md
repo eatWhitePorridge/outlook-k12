@@ -1,245 +1,196 @@
-# gpt_register_lite
+# outlook-k12
 
-精简版 OpenAI 协议注册：**只做「创建账号 + auth 拿 token」，无任何支付**。
-收验证码支持两种后端：
+一个轻量的 Outlook OAuth 邮箱池注册控制台：粘贴 Outlook 账号行，自动完成邮箱验证码流程，注册后可加入指定 `workspace_id`（workid），并导出可用于 sub2api 的账号 JSON。
 
-- 自建 Cloud Mail（`example.com`）HTTP API
-- Outlook / Microsoft Graph OAuth API（`email----password----client_id----refresh_token`）
+## 核心能力
 
-## 链路
+- **Outlook OAuth 接码**：支持 `email----password----client_id----refresh_token` 格式的邮箱池。
+- **批量注册**：支持原始邮箱 / plus alias、并发、重试、收码轮询参数。
+- **加入 Workspace**：注册后填写 `workspace_id`，自动 join workspace，并重新获取 workspace-scoped AT。
+- **Web 控制台**：浏览器启动任务、查看日志、下载产物、手动上传 sub2api。
+- **持久化任务**：任务、日志、结果摘要、前端配置保存到 SQLite，刷新页面不丢配置。
+- **上传后清理**：sub2api 上传成功后，默认清理本地 token 产物和 DB 敏感字段。
+- **Docker 部署**：单容器 + `/data` 挂卷，适合放在 VPS 上做控制台。
 
-```
-邮箱后端(Cloud Mail 或 Outlook OAuth)
-  →  协议注册 8 步  →  收邮箱 OTP  →  /oauth/token 拿 platform token
-  →  可选 ChatGPT Web flow 拿 backend-api AT
-  →  可选 join workspace + exchange workspace-scoped AT
-```
+## 快速开始
 
-产出：`email`、`password`、`access_token`、`refresh_token`、`id_token`、`device_id`。
-
-## 目录
-
-```
-gpt_register_lite/
-├── core/              # 协议底层（从原项目移植，未改）
-│   ├── pkce.py        #   PKCE / device_id / state / nonce
-│   ├── profile.py     #   浏览器指纹（UA / sec-ch-ua / locale）
-│   ├── http_client.py #   httpx 客户端 + 标准头 + OAuth 常量
-│   └── sentinel.py    #   OpenAI Sentinel PoW
-├── flow.py            # 精简注册流程（创建 + token，无支付）
-├── cloudmail.py       # Cloud Mail 收码客户端（登录/建邮箱/轮询 OTP）
-├── outlook.py         # Outlook / Microsoft Graph OAuth 收码客户端
-├── register.py        # 顶层编排 register_and_auth()
-├── config.py          # 配置加载（JSON + 环境变量覆盖）
-├── cli.py             # 命令行入口
-├── api.py             # 最小 HTTP 服务（FastAPI，可选）
-├── batch_jobs.py      # Web 控制台批量 Outlook 注册任务
-└── config.example.json
-```
-
-## 安装
+### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
-cp config.example.json config.json   # 填入 admin 密码等
 ```
 
-## 配置
-
-`config.json`（敏感项可用环境变量覆盖，见下）：
-
-| 字段 | 说明 |
-|------|------|
-| `cloudmail.base_url` | Cloud Mail 地址，如 `https://cloudmail.example.com` |
-| `cloudmail.admin_email` | 登录用 admin 邮箱 |
-| `cloudmail.admin_password` | admin 密码 |
-| `cloudmail.domain` | 子邮箱域名（catch-all），如 `example.com` |
-| `cloudmail.proxy` | 访问 Cloud Mail 的代理（一般直连，留 `null`） |
-| `register_proxy` | OpenAI 注册走的代理（`http://user:pass@host:port` 或 socks5） |
-| `otp_max_retries` / `otp_poll_interval_s` | 收码轮询次数 / 间隔秒 |
-| `chatgpt_web_login` | `true` 时注册后走纯 ChatGPT Web flow，输出 backend-api AT |
-| `workspace_id` | 非空时注册后加入该 workspace，并换 workspace-scoped AT |
-
-环境变量（优先级高于文件，适合放密钥）：
-`MAIL_BACKEND` `CM_BASE_URL` `CM_ADMIN_EMAIL` `CM_ADMIN_PASSWORD` `CM_DOMAIN` `CM_PROXY` `REGISTER_PROXY`
-
-### Outlook OAuth 收码配置
-
-把邮箱池行放到环境变量即可：
+### 2. 启动本地控制台
 
 ```bash
-export MAIL_BACKEND=outlook
-export OUTLOOK_ACCOUNT_LINE='email@outlook.com----password----client_id----refresh_token'
+REGISTER_DB_PATH=.local_data/register_console.db \
+BATCH_RUN_ROOT=.local_data/batch_runs \
+BATCH_PURGE_AFTER_UPLOAD=1 \
+python -m uvicorn gpt_register_lite.api:app --host 127.0.0.1 --port 8000
 ```
 
-也可以拆开配置：
-
-```bash
-export MAIL_BACKEND=outlook
-export OUTLOOK_EMAIL='email@outlook.com'
-export OUTLOOK_CLIENT_ID='client_id'
-export OUTLOOK_REFRESH_TOKEN='refresh_token'
-# 可选
-export OUTLOOK_TENANT='consumers'
-export OUTLOOK_SCOPE='https://graph.microsoft.com/.default offline_access'
-# 默认 mode=auto：先试 Graph Mail.Read，不可用时自动回退 IMAP XOAUTH2
-export OUTLOOK_MODE='auto'
-```
-
-Outlook 后端不会新建邮箱；不传 `--email` 时会直接使用配置里的 Outlook 地址。
-默认 `OUTLOOK_ALIAS_MODE=plus`，因此自动模式会用
-`name+oai<随机>@outlook.com` 这种 Outlook 变体收码；如需固定主邮箱，设
-`OUTLOOK_ALIAS_MODE=base`。
-
-## 用法
-
-### 1) 库
-
-```python
-import asyncio
-from gpt_register_lite import CloudMailClient, CloudMailConfig, register_and_auth
-
-async def main():
-    cm = CloudMailClient(CloudMailConfig(
-        base_url="https://cloudmail.example.com",
-        admin_email="admin@example.com",
-        admin_password="...",
-        domain="example.com",
-    ))
-    result = await register_and_auth(cloudmail=cm)   # email=None → 自动新建子邮箱
-    print(result.to_dict())
-
-asyncio.run(main())
-```
-
-### 2) CLI
-
-```bash
-# 单个（自动新建邮箱）
-python -m gpt_register_lite.cli --config config.json -v
-
-# Outlook OAuth 单号注册（使用 OUTLOOK_ACCOUNT_LINE 指定的邮箱收码）
-MAIL_BACKEND=outlook OUTLOOK_ACCOUNT_LINE='email@outlook.com----password----client_id----refresh_token' \
-python -m gpt_register_lite.cli --config config.json -v
-
-# 注册后拿纯 ChatGPT Web AT（不是 Codex/CLI OAuth）
-MAIL_BACKEND=outlook OUTLOOK_ACCOUNT_LINE='email@outlook.com----password----client_id----refresh_token' \
-python -m gpt_register_lite.cli --config config.json --chatgpt-web -v
-
-# 注册后加入 workspace，并保存加入后的 workspace-scoped Web AT
-MAIL_BACKEND=outlook OUTLOOK_ACCOUNT_LINE='email@outlook.com----password----client_id----refresh_token' \
-python -m gpt_register_lite.cli --config config.json --workspace-id '<workspace_id>' -v
-
-# 批量 5 个，结果写 results.json
-python -m gpt_register_lite.cli --config config.json --count 5 --out results.json
-
-# 指定邮箱
-python -m gpt_register_lite.cli --config config.json --email me@example.com
-```
-
-### 3) Codex SSO RT + sub2api
-
-```bash
-# 生成 product/sub2api JSON
-python -m gpt_register_lite.test_codex_browser 987654321 \
-  --protocol-sso \
-  --product-json \
-  --out /tmp/openai_account.json
-
-# 生成成功后自动上传到 sub2api
-SUB2API_AUTHORIZATION='Bearer <admin-jwt>' \
-python -m gpt_register_lite.test_codex_browser 987654321 \
-  --protocol-sso \
-  --product-json \
-  --out /tmp/openai_account.json \
-  --sub2api-upload \
-  --sub2api-url https://sub2api.example.com
-
-# 也可以把已有汇总 JSON 上传
-SUB2API_AUTHORIZATION='Bearer <admin-jwt>' \
-python -m gpt_register_lite.sub2api upload /tmp/accounts_product.json \
-  --base-url https://sub2api.example.com \
-  --mode batch
-```
-
-`--sub2api-upload` 默认使用 `POST /api/v1/admin/accounts/batch`。也支持
-`SUB2API_BASE_URL`、`SUB2API_AUTHORIZATION`、`SUB2API_ADMIN_API_KEY`、
-`SUB2API_UPLOAD_MODE=batch|data` 环境变量。
-
-SSO 连接可用环境变量配置：
-
-```bash
-SSO_BASE_URL=https://sso.example.com
-SSO_CONNECTION_ID=conn_xxxxxxxxxxxxxxxxxxxxxxxxxx
-SSO_EMAIL_DOMAIN=example.com
-CODEX_SSO_JOIN_TEAM_FIRST=false
-```
-
-默认是直接跑 Codex OAuth。只有调试旧链路时才设
-`CODEX_SSO_JOIN_TEAM_FIRST=true`，或 CLI 临时加 `--join-team-first`。
-
-`POST /codex/sso` 也支持在请求体里临时覆盖：
-
-```bash
-curl -sS http://127.0.0.1:8000/codex/sso \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"987654321","sso_base_url":"https://sso.example.com","sso_connection_id":"conn_xxxxxxxxxxxxxxxxxxxxxxxxxx","sso_email_domain":"example.com"}'
-```
-
-### 4) HTTP 服务
-
-```bash
-pip install fastapi uvicorn
-CONFIG_PATH=config.json uvicorn gpt_register_lite.api:app --host 127.0.0.1 --port 8000
-```
-
-浏览器打开：
+打开：
 
 ```text
 http://127.0.0.1:8000/ui
 ```
 
-控制台支持：
-
-- 粘贴 Outlook 池：`email----password----client_id----refresh_token`
-- 设置原始邮箱 / plus alias、每邮箱数量、并发、重试、workspace ID
-- 任务、日志、结果摘要和页面配置持久化到 SQLite（默认 `REGISTER_DB_PATH`）
-- 注册后生成 `results_full.json`、AT 一行一个、sub2api product JSON
-- 填 sub2api Bearer 后自动上传，或任务完成后手动上传
-- 默认上传成功后清理本地 token 产物和 DB 敏感字段，只保留 summary/log/receipt
-
-Docker 部署默认把状态放到 `/data` 挂卷：
+### 3. Docker 部署
 
 ```bash
 docker compose up -d --build
 ```
 
-关键环境变量：
+默认端口：
 
-```bash
+```text
+http://127.0.0.1:8000/ui
+```
+
+如果要对公网开放，请先设置 `API_KEY`，再把 compose 里的端口改成 `8000:8000`。
+
+## Outlook 账号格式
+
+每行一个 Outlook 账号：
+
+```text
+email@outlook.com----password----client_id----refresh_token
+```
+
+示例：
+
+```text
+user@example.com----password----client_id----refresh_token
+```
+
+说明：
+
+- `email`：Outlook 邮箱。
+- `password`：邮箱密码，仅用于记录/兼容字段。
+- `client_id`：Microsoft OAuth client id。
+- `refresh_token`：Microsoft OAuth refresh token，用于 Graph/IMAP 收验证码。
+
+## 通过 Outlook 加入 workid
+
+在 Web 控制台里：
+
+1. 粘贴 Outlook 账号池。
+2. 填写 `Workspace ID`，也就是 workid。
+3. 邮箱模式建议先选 **原始邮箱**。
+4. 并发建议从 `1~3` 开始。
+5. 如需代理，在“注册代理”里填写代理 URL。
+6. 点击“启动任务”。
+
+代理格式示例：
+
+```text
+http://user:pass@host:port
+socks5h://user:pass@host:port
+```
+
+如果是 SOCKS5 代理，优先使用 `socks5h://`，让代理端解析域名。
+
+## 控制台字段说明
+
+| 字段 | 说明 |
+| --- | --- |
+| `Outlook 账号` | 每行一个 Outlook OAuth 账号。 |
+| `Workspace ID` | 注册后要加入的 workid。 |
+| `邮箱模式` | `原始邮箱` 或 `Plus 别名`。原始邮箱更稳。 |
+| `每邮箱` | 每个邮箱注册数量；原始邮箱模式固定为 1。 |
+| `并发` | 同时注册数量；代理不稳时建议 1~3。 |
+| `重试` | 单个账号失败后的重试次数。 |
+| `注册代理` | OpenAI/ChatGPT 注册链路代理。 |
+| `完成后上传 sub2api` | 任务完成后自动上传生成的 sub2api JSON。 |
+| `上传成功后清理本地敏感产物` | 默认开启，上传后删除 token 文件并清理 DB 敏感字段。 |
+
+## 产物
+
+每个任务会生成独立目录，包含：
+
+```text
+summary.json
+results_full.json
+access_tokens_one_per_line.txt
+sub2api_product_N.json
+run.log
+sub2api_upload_receipt_*.json
+```
+
+如果开启上传后清理，上传成功后默认只保留：
+
+```text
+summary.json
+run.log
+sub2api_upload_receipt_*.json
+```
+
+## 持久化配置
+
+Docker 默认使用：
+
+```text
 REGISTER_DB_PATH=/data/register_console.db
 BATCH_RUN_ROOT=/data/batch_runs
 BATCH_PURGE_AFTER_UPLOAD=1
 ```
 
-```bash
-curl -X POST http://127.0.0.1:8000/register -H 'Content-Type: application/json' -d '{}'
-# 自动建邮箱并注册；可带 {"email": "...", "proxy": "...", "password": "..."}
+本地可按需改成：
+
+```text
+REGISTER_DB_PATH=.local_data/register_console.db
+BATCH_RUN_ROOT=.local_data/batch_runs
 ```
 
-> ⚠️ 该接口会触发对外注册行为。**只绑 `127.0.0.1`**，或设 `API_KEY` 环境变量后请求带
-> `X-API-Key`。不要裸奔公网。
+`.local_data/`、DB、日志、token 产物已在 `.gitignore` 中屏蔽。
 
-## 注意事项
+## API Key
 
-- **Token 复用**：Cloud Mail 的登录 token 存在 KV，单用户上限 10 个，超了挤掉最老的。
-  本客户端把 JWT 缓存到本地文件（`~/.gpt_register_lite_cm_token.json`，权限 600），
-  避免每次注册都重新登录而把你网页端的会话挤下线。401 时才自动重登。
-- **建邮箱需人机验证**：若 Cloud Mail 后台对「新增邮箱」开了 Turnstile
-  （`addVerifyOpen=true`），无人值守无法自动建邮箱 —— 改用 `--email` 指定已有地址，
-  或在后台关掉该验证。
-- **代理**：OpenAI 注册建议挂干净住宅代理（`register_proxy`）；Cloud Mail 一般直连。
-- **风控**：批量注册默认串行，别并发猛打同一 IP。
+如果设置了：
+
+```bash
+API_KEY=your_api_key
+```
+
+所有批量任务接口都需要请求头：
+
+```text
+X-API-Key: your_api_key
+```
+
+Web 控制台右上角填入并保存即可。
+
+## 常见问题
+
+### 代理能连上但任务超时？
+
+先用 curl 测试：
+
+```bash
+curl -x 'socks5h://user:pass@host:port' https://ipinfo.io/ip
+curl -x 'socks5h://user:pass@host:port' https://auth.openai.com/
+```
+
+如果 `ipinfo` 或 `auth.openai.com` 超时，任务也会在 `敲门 authorize` 阶段超时。
+
+### VPS 上容易失败？
+
+VPS 机房 IP 容易触发风控。建议 VPS 只做控制台，注册链路走干净代理，并降低并发。
+
+### 能同时开多个任务吗？
+
+可以。每个任务内部也有并发，多个任务叠加会放大请求量。建议总并发先控制在 `1~3`。
+
+### 页面刷新配置会丢吗？
+
+不会。控制台配置会保存到 SQLite。
+
+## 安全建议
+
+- 不要提交 `.env`、SQLite DB、任务产物、日志、token 文件。
+- 不要把真实 Outlook 账号行写进 README 或 issue。
+- 公开部署必须设置 `API_KEY`。
+- sub2api 上传成功后建议保持默认清理策略。
 
 ## 致谢
 
