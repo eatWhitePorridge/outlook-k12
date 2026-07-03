@@ -6,11 +6,6 @@
 - 自建 Cloud Mail（`example.com`）HTTP API
 - Outlook / Microsoft Graph OAuth API（`email----password----client_id----refresh_token`）
 
-从 `GPT_PLUS纯协议版/botcore/protocol_register` 提炼而来，去掉了支付（PayPal/checkout）、
-add-phone。注册后可选走 **纯 ChatGPT Web / NextAuth flow** 拿
-`chatgpt.com/backend-api` 可用的 AT，并可自动加入指定 workspace 后重新换
-workspace-scoped AT。
-
 ## 链路
 
 ```
