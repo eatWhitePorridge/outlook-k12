@@ -245,3 +245,7 @@ curl -X POST http://127.0.0.1:8000/register -H 'Content-Type: application/json' 
   或在后台关掉该验证。
 - **代理**：OpenAI 注册建议挂干净住宅代理（`register_proxy`）；Cloud Mail 一般直连。
 - **风控**：批量注册默认串行，别并发猛打同一 IP。
+
+## 致谢
+
+感谢 [LINUX DO](https://linux.do/) 社区的交流与支持。
